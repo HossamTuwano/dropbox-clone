@@ -1,9 +1,16 @@
 'use client'
+import { db, storage } from '@/firebase'
 import { cn } from '@/lib/utils'
 import { useUser } from '@clerk/nextjs'
-import { read } from 'fs'
-import React, { useCallback, useState } from 'react'
-
+import {
+  addDoc,
+  collection,
+  doc,
+  serverTimestamp,
+  updateDoc,
+} from 'firebase/firestore'
+import { useState } from 'react'
+import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'
 import DropzoneComponent, { useDropzone } from 'react-dropzone'
 function Dropzone() {
   const [isLoading, setIsLoading] = useState<boolean>(false)
@@ -11,6 +18,8 @@ function Dropzone() {
   const onDrop = (acceptedFiles: File[]) => {
     acceptedFiles.forEach((file) => {
       const reader = new FileReader()
+      reader.onabort = () => console.log('file reading was aborted')
+      reader.onerror = () => console.log('file reading has failed')
       reader.onload = async () => {
         await uploadPost(file)
       }
@@ -18,9 +27,29 @@ function Dropzone() {
     })
   }
 
-  const uploadPost = async () => {
+  const uploadPost = async (selectedFile: File) => {
     if (isLoading) return
+    if (!user) return
     setIsLoading(true)
+    //addDoc ->  user/user123/files
+
+    const docRef = await addDoc(collection(db, 'users', user.id, 'files'), {
+      userId: user.id,
+      filename: selectedFile.name,
+      fullName: user.fullName,
+      timestamp: serverTimestamp(),
+      type: selectedFile.type,
+      size: selectedFile.size,
+    })
+
+    const imageRef = ref(storage, `users/${user.id}/files/${docRef.id}`)
+
+    await uploadBytes(imageRef, selectedFile).then(async (snapshot) => {
+      const downloadURL = await getDownloadURL(imageRef)
+      await updateDoc(doc(db, 'users', user.id, 'files', docRef.id), {
+        downloadURL: downloadURL,
+      })
+    })
     setIsLoading(false)
   }
 
@@ -29,7 +58,7 @@ function Dropzone() {
   const maxSize = 20971520
 
   return (
-    <DropzoneComponent onDrop={(acceptFiles) => console.log(acceptFiles)}>
+    <DropzoneComponent minSize={0} maxSize={maxSize} onDrop={onDrop}>
       {({
         getRootProps,
         getInputProps,
